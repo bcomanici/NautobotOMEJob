@@ -1,0 +1,4 @@
+# requests is normally already installed with Nautobot, but is declared for
+# reproducible local testing and custom worker images.
+requests>=2.31,<3
+
