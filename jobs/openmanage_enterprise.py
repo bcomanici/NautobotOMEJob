@@ -16,7 +16,6 @@ from nautobot.apps.jobs import (
     Job,
     ObjectVar,
     StringVar,
-    register_jobs,
 )
 from nautobot.dcim.models import Device, DeviceType, Location, Manufacturer, Platform, SoftwareVersion
 from nautobot.extras.choices import SecretsGroupAccessTypeChoices, SecretsGroupSecretTypeChoices
@@ -301,8 +300,28 @@ class SyncOpenManageEnterpriseDevices(Job):
             rows = payload.get("value", payload if isinstance(payload, list) else [])
             for row in rows:
                 ome_id = row.get("Id", row.get("DeviceId"))
+                device_data = dict(row)
                 inventory: Any = {}
                 if ome_id not in (None, ""):
+                    detail_response = session.get(
+                        f"{base_url}/api/DeviceService/Devices({ome_id})",
+                        timeout=60,
+                    )
+                    if detail_response.ok:
+                        detail_payload = detail_response.json()
+                        if isinstance(detail_payload, dict):
+                            device_data.update({
+                                key: value
+                                for key, value in detail_payload.items()
+                                if value not in (None, "", [])
+                            })
+                    else:
+                        self.logger.warning(
+                            "Could not fetch the detailed OME device record for %s (%s): %s",
+                            ome_id,
+                            detail_response.status_code,
+                            detail_response.text[:500],
+                        )
                     inv_response = session.get(
                         f"{base_url}/api/DeviceService/Devices({ome_id})/InventoryDetails",
                         timeout=60,
@@ -317,7 +336,20 @@ class SyncOpenManageEnterpriseDevices(Job):
                             inv_response.status_code,
                             inv_response.text[:500],
                         )
-                records.append(parse_system(row, inventory))
+                system = parse_system(device_data, inventory)
+                if system.platform_name or system.software_version:
+                    self.logger.info(
+                        "OME running OS for %s: platform=%s software_version=%s.",
+                        system.hostname or ome_id,
+                        system.platform_name or "<blank>",
+                        system.software_version or "<blank>",
+                    )
+                else:
+                    self.logger.warning(
+                        "OME returned no running OS name/version for %s after summary, detail, and inventory queries.",
+                        system.hostname or ome_id,
+                    )
+                records.append(system)
             if len(rows) < page_size:
                 break
             skip += len(rows)
@@ -518,7 +550,3 @@ class SyncOpenManageEnterpriseDevices(Job):
             candidate = f"{base[:40]}-{suffix}"
             suffix += 1
         return candidate
-
-
-jobs = [SyncOpenManageEnterpriseDevices]
-register_jobs(*jobs)

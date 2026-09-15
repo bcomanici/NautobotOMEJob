@@ -5,6 +5,7 @@ This repository is ready to add to Nautobot as a Git data source with Jobs enabl
 ## Repository layout
 
 ```text
+__init__.py
 jobs/
   __init__.py
   ome_helpers.py
@@ -15,13 +16,16 @@ requirements.txt
 README.md
 ```
 
-`openmanage_enterprise.py` calls `register_jobs()`, as required by Nautobot 2.x and later.
+`jobs/__init__.py` imports the Job class and calls `register_jobs()`. This is important for Git data sources because Nautobot imports the repository's `<slug>.jobs` package during synchronization; it does not automatically import every child module.
+
+The top-level `__init__.py` is also required. It makes the repository itself importable as the Python package named from the Nautobot Git repository slug, such as `dellomesync`, before Nautobot imports `dellomesync.jobs`.
 
 ## Data mapping
 
 | OME value | Nautobot destination |
 | --- | --- |
 | Device name / hostname | Device `name` |
+| Management IP when hostname is absent or IP-only | Device `name` fallback: `<make> <model> <management IP>` |
 | Service tag | Device `serial` |
 | System vendor / make | Manufacturer |
 | Model | Device Type |
@@ -37,6 +41,8 @@ The Platform and Software Version behavior follows the supplied RMM Job: both ar
 ## Duplicate protection
 
 The default match mode checks hostname and serial number. Hostnames are case-insensitive and compare both FQDN and short-name forms. Serial numbers ignore punctuation and case. Existing matches are skipped unless **Update existing Devices** is enabled. If the hostname and serial resolve to different Devices, that OME record fails without changing either Device.
+
+For an appliance whose OME `DeviceName` is only its management IP, the Job creates a readable deterministic name such as `Dell Inc. ME5212 172.24.2.39`. Matching also checks the raw management IP, allowing the Job to recognize a pre-existing Device named only `172.24.2.39`.
 
 ## Custom fields
 
@@ -69,7 +75,10 @@ Create a Nautobot Secrets Group with:
 The Job creates an OME API session and reads:
 
 - `/api/DeviceService/Devices`
+- `/api/DeviceService/Devices(<id>)`
 - `/api/DeviceService/Devices(<id>)/InventoryDetails`
+
+The per-device detail request is intentional: some OME versions expose the running OS on the detailed Device resource even when it is absent from the paginated Device summary. OS extraction is case- and separator-insensitive across common OME keys. Each run logs the detected Platform and Software Version, or an explicit warning when OME returns neither value.
 
 Use an OME account with read-only inventory permissions where possible.
 
@@ -102,4 +111,3 @@ The Job targets the modern `nautobot.apps.jobs` and `CustomField.key` interfaces
 - Nautobot Jobs: https://docs.nautobot.com/projects/core/en/stable/user-guide/platform-functionality/jobs/
 - Nautobot Git repositories/data sources: https://docs.nautobot.com/projects/core/en/stable/user-guide/platform-functionality/gitrepository/
 - Dell OpenManage Enterprise REST API Guide: https://www.dell.com/support/manuals/en-us/dell-openmanage-enterprise/ome_p_api_guide/
-
